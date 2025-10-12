@@ -1,0 +1,258 @@
+{
+  "appName": "LadyCo Supplier Portal",
+  "description": "Portal inteligente para fornecedores responderem cotações com upload automatizado e integração ao dashboard interno LadyCo.",
+  "dataModel": {
+    "tables": [
+      {
+        "name": "cotacoes",
+        "fields": [
+          { "name": "id", "type": "uuid", "primaryKey": true },
+          { "name": "numero", "type": "string" },
+          { "name": "prazoResposta", "type": "datetime" },
+          { "name": "status", "type": "enum", "values": ["Criada", "Em andamento", "Concluida"] }
+        ],
+        "indexes": ["numero"]
+      },
+      {
+        "name": "produtos_cotacao",
+        "fields": [
+          { "name": "id", "type": "uuid", "primaryKey": true },
+          { "name": "cotacaoId", "type": "uuid", "relation": "cotacoes.id" },
+          { "name": "nome", "type": "string" },
+          { "name": "descricao", "type": "text", "optional": true },
+          { "name": "quantidade", "type": "number" },
+          { "name": "unidade", "type": "string", "optional": true }
+        ]
+      },
+      {
+        "name": "fornecedores",
+        "fields": [
+          { "name": "id", "type": "uuid", "primaryKey": true },
+          { "name": "nome", "type": "string" },
+          { "name": "email", "type": "string" },
+          { "name": "telefone", "type": "string", "optional": true }
+        ]
+      },
+      {
+        "name": "respostas_fornecedores",
+        "fields": [
+          { "name": "id", "type": "uuid", "primaryKey": true },
+          { "name": "cotacaoId", "type": "uuid", "relation": "cotacoes.id" },
+          { "name": "fornecedorId", "type": "uuid", "relation": "fornecedores.id" },
+          { "name": "produtoCotacaoId", "type": "uuid", "relation": "produtos_cotacao.id" },
+          { "name": "precoUnitario", "type": "currency", "optional": true },
+          { "name": "prazoEntregaDias", "type": "number", "optional": true },
+          { "name": "observacoes", "type": "text", "optional": true },
+          { "name": "arquivoUploadUrl", "type": "file", "optional": true },
+          { "name": "status", "type": "enum", "values": ["pendente", "respondido", "erro_leitura"], "default": "pendente" },
+          { "name": "protocolo", "type": "string", "optional": true },
+          { "name": "hashEnvio", "type": "string", "optional": true },
+          { "name": "enviadoEm", "type": "datetime", "optional": true }
+        ],
+        "indexes": ["cotacaoId", "fornecedorId", "status"]
+      },
+      {
+        "name": "tokens_convite",
+        "fields": [
+          { "name": "id", "type": "uuid", "primaryKey": true },
+          { "name": "cotacaoId", "type": "uuid", "relation": "cotacoes.id" },
+          { "name": "fornecedorId", "type": "uuid", "relation": "fornecedores.id" },
+          { "name": "token", "type": "string", "unique": true },
+          { "name": "expiraEm", "type": "datetime" },
+          { "name": "utilizadoEm", "type": "datetime", "optional": true },
+          { "name": "ipEnvio", "type": "string", "optional": true }
+        ]
+      }
+    ]
+  },
+  "automation": {
+    "workflows": [
+      {
+        "name": "Envio de link para fornecedor",
+        "trigger": "cotacao_publicada",
+        "steps": [
+          "Gerar token único para cada fornecedor",
+          "Montar URL segura (ex: /cotacao/{cotacaoId}?token=VDV-abc123)",
+          "Enviar e-mail com prazo e resumo dos itens"
+        ]
+      },
+      {
+        "name": "Leitura inteligente de arquivos",
+        "trigger": "upload_arquivo_fornecedor",
+        "steps": [
+          "Executar OCR + NLP para extrair tabela de produtos",
+          "Normalizar valores monetários e prazos",
+          "Comparar nomes com produtos_cotacao utilizando similaridade semântica",
+          "Sugerir correspondências e preencher campos na tabela",
+          "Marcar respostas_fornecedores.status como 'respondido' após confirmação"
+        ]
+      },
+      {
+        "name": "Atualização do dashboard interno",
+        "trigger": "cotacao_respondida",
+        "steps": [
+          "Atualizar coluna do fornecedor na tabela comparativa",
+          "Calcular automaticamente menor preço por item",
+          "Atualizar status do fornecedor para 'Respondido'",
+          "Gerar resumo executivo da cotação"
+        ]
+      }
+    ],
+    "ai": {
+      "providers": ["openai"],
+      "prompts": [
+        {
+          "name": "extracao_planilha_pdf",
+          "purpose": "Extrair produtos, preços e condições de arquivos PDF ou planilhas.",
+          "input": "Arquivo binário + contexto da cotação",
+          "output": "JSON com itens mapeados, preços normalizados e notas"
+        },
+        {
+          "name": "resumo_executivo",
+          "purpose": "Gerar resumo comparativo entre fornecedores.",
+          "input": "Dados agregados de respostas",
+          "output": "Resumo textual destacando melhores preços, prazos e observações"
+        }
+      ]
+    }
+  },
+  "screens": [
+    {
+      "name": "Dashboard",
+      "route": "/dashboard",
+      "layout": "two-column",
+      "sections": [
+        {
+          "type": "header",
+          "title": "Dashboard de Comparação de Preços",
+          "subtitle": "Acompanhe respostas de fornecedores em tempo real"
+        },
+        {
+          "type": "cards",
+          "items": [
+            { "title": "Cotações em andamento", "source": "cotacoes", "metric": "count(status='Em andamento')" },
+            { "title": "Fornecedores respondidos", "source": "respostas_fornecedores", "metric": "count(status='respondido')" },
+            { "title": "Melhor economia", "metric": "calcularEconomiaAtual" }
+          ]
+        },
+        {
+          "type": "table",
+          "title": "Comparativo de Fornecedores",
+          "dataSource": "respostas_fornecedores",
+          "columns": [
+            { "label": "Produto", "value": "produtoCotacaoId.nome" },
+            { "label": "Quantidade", "value": "produtoCotacaoId.quantidade" },
+            { "label": "Fornecedor", "value": "fornecedorId.nome" },
+            { "label": "Preço Unitário", "value": "precoUnitario", "format": "currency", "highlight": "menor_valor" },
+            { "label": "Prazo", "value": "prazoEntregaDias", "format": "days" },
+            { "label": "Status", "value": "status" }
+          ],
+          "actions": ["verDetalhesCotacao", "exportarPDFComparativo"]
+        },
+        {
+          "type": "timeline",
+          "title": "Linha do tempo da cotação",
+          "source": "logs_auditoria"
+        }
+      ]
+    },
+    {
+      "name": "Portal do Fornecedor",
+      "route": "/cotacao/:cotacaoId",
+      "layout": "single-column",
+      "sections": [
+        {
+          "type": "hero",
+          "title": "Cotação #{{cotacoes.numero}} — Responda sua proposta",
+          "subtitle": "Prazo de resposta: {{formatDate(cotacoes.prazoResposta, 'DD/MM às HH:mm')}}",
+          "logo": "ladyco"
+        },
+        {
+          "type": "table-form",
+          "title": "Resposta de Cotação",
+          "description": "Preencha manualmente ou utilize o upload inteligente para importar os preços",
+          "dataSource": "produtos_cotacao",
+          "editable": true,
+          "columns": [
+            { "label": "Produto", "value": "nome", "readOnly": true },
+            { "label": "Quantidade", "value": "quantidade", "readOnly": true },
+            { "label": "Preço Unitário", "value": "respostas_fornecedores.precoUnitario", "input": "currency", "autocomplete": "currency" },
+            { "label": "Prazo de Entrega (dias)", "value": "respostas_fornecedores.prazoEntregaDias", "input": "number" },
+            { "label": "Observações", "value": "respostas_fornecedores.observacoes", "input": "textarea", "optional": true }
+          ]
+        },
+        {
+          "type": "upload",
+          "title": "Upload Inteligente",
+          "description": "Envie sua planilha ou PDF de cotação (opcional). O sistema lerá automaticamente os valores e preencherá os campos.",
+          "accept": [".xlsx", ".csv", ".pdf"],
+          "maxSizeMB": 10,
+          "buttons": [{ "label": "Upload de Arquivo", "action": "uploadArquivoCotacao" }],
+          "postUpload": {
+            "preview": {
+              "title": "Pré-visualização dos produtos identificados",
+              "type": "table",
+              "dataSource": "preProcessamentoIA"
+            },
+            "actions": [{ "label": "Confirmar leitura automática", "action": "confirmarLeituraIA" }]
+          }
+        },
+        {
+          "type": "footer-fixed",
+          "buttons": [
+            { "label": "Enviar Cotação", "style": "primary", "action": "enviarCotacaoFornecedor" }
+          ],
+          "successMessage": "Sua cotação foi enviada com sucesso!"
+        }
+      ]
+    },
+    {
+      "name": "Upload Inteligente",
+      "route": "/upload-preview",
+      "layout": "single-column",
+      "sections": [
+        {
+          "type": "status",
+          "steps": [
+            { "icon": "upload", "title": "Arquivo recebido" },
+            { "icon": "robot", "title": "IA lendo a cotação" },
+            { "icon": "check", "title": "Campos preenchidos" }
+          ]
+        },
+        {
+          "type": "table",
+          "title": "Produtos detectados",
+          "dataSource": "preProcessamentoIA",
+          "columns": [
+            { "label": "Produto original", "value": "produtoArquivo" },
+            { "label": "Produto mapeado", "value": "produtoCotacao" },
+            { "label": "Confiança", "value": "score", "format": "percent" },
+            { "label": "Preço", "value": "preco", "format": "currency" },
+            { "label": "Ação", "value": "acao", "input": "select", "options": ["aceitar", "editar", "descartar"] }
+          ]
+        },
+        {
+          "type": "callout",
+          "style": "info",
+          "title": "Diferenças encontradas",
+          "text": "Verifique possíveis variações de nomenclatura, como 'Cadeira de SPA' vs 'Poltrona SPA'."
+        },
+        {
+          "type": "actions",
+          "buttons": [
+            { "label": "Aplicar ajustes", "action": "aplicarAjustesIA" },
+            { "label": "Voltar à cotação", "action": "voltarPortalFornecedor" }
+          ]
+        }
+      ]
+    }
+  ],
+  "security": {
+    "authentication": "token_unico_link",
+    "rules": [
+      "Cada token só pode ser utilizado uma vez",
+      "Registrar IP, data e hora a cada envio",
+      "Bloquear novas submissões após status 'respondido'"
+    ]
+  }
+}
